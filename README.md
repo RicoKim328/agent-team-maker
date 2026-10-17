@@ -38,6 +38,7 @@ Agent Team Maker는 여러 서브에이전트를 **팀 단위의 계층 구조**
 | 🔌 **스위치 하나로 켜고 끄기** | `t` 키 한 번으로 팀 모드 ON/OFF. 끄면 바로 평소의 Claude로 돌아옵니다. 팀 단위로도 따로 끌 수 있습니다. |
 | ⚡ **즉시 반영** | 이름·역할·모델을 바꾸면 다음 요청부터 바로 적용됩니다. 세션 재시작이 필요 없습니다. |
 | 🧱 **팀 간 격리** | 한 팀에는 다른 팀의 계획·결과·의견이 전달되지 않습니다. 팀끼리 서로 영향을 주지 않으니 독립적인 시각을 얻을 수 있습니다(예: 두 리뷰 팀의 교차 검증). |
+| 🔀 **같은 계층 정보 흐름** | 같은 부모 아래 에이전트끼리 결과를 넘길 방향을 정할 수 있습니다(`→` 한쪽으로만, `↔` 서로). 정하지 않은 방향으로 결과를 넘기려 하면 모드가 호출을 막습니다. |
 | 🛡️ **호출 폭주 방지** | 팀 에이전트끼리는 서로를 호출할 수 없도록 모드가 막습니다. 호출은 항상 main 한 곳에서만 일어나 흐름을 추적하기 쉽습니다. |
 | 💰 **역할별 모델 선택** | 매니저는 `opus`, 워커는 `sonnet`, 단순 작업은 `haiku`처럼 박스마다 모델을 고를 수 있어 품질과 비용을 함께 조절합니다. |
 | 🧩 **스킬 연결** | 에이전트마다 사용할 스킬을 지정할 수 있습니다. |
@@ -53,19 +54,50 @@ Claude Code에서 아래 두 줄을 실행합니다.
 
 ```
 /plugin marketplace add RicoKim328/agent-team-maker
-/plugin install agentteam-maker@rico-agentteam
+/plugin install agent-team-maker@rico-agentteam
 ```
+
+> **이전 이름(`agentteam-maker`)으로 설치했다면** 옛 플러그인을 지우고(`/plugin uninstall agentteam-maker@rico-agentteam`) 위 명령으로 다시 설치하세요. 패널 명령은 `/agent-team-maker`, 에이전트 타입은 `agent-team-maker:<팀>-<에이전트>`로 바뀝니다. 저장된 설계는 플러그인 이름별로 보관되므로 새 이름으로는 이어지지 않습니다. 필요하면 내보내 둔 `.claude/agentteam/team.json`을 참고해 다시 만들어 주세요.
 
 ---
 
 ## 빠른 시작 (3분)
 
-1. **패널 열기** — `/agentteam-maker` 를 입력하면 *Agent Team Maker* 패널이 열립니다. 처음에는 팀 2개(각각 매니저 1명 + 멤버 2명)짜리 예시가 들어 있습니다.
+1. **패널 열기** — `/agent-team-maker` 를 입력하면 *Agent Team Maker* 패널이 열립니다. 처음에는 팀 2개(각각 매니저 1명 + 멤버 2명)짜리 예시가 들어 있습니다.
 2. **역할 적기** — 박스를 선택하고 오른쪽 편집 영역에서 이름, 모델, **Role(역할)** 을 채웁니다. 역할이 구체적일수록 결과가 좋아집니다.
    - 매니저: "멤버 결과를 어떻게 검토하고 합칠지"
    - 멤버: "무엇을 담당하는지"
 3. **팀 켜기** — `t` 를 눌러 `● Teams: on` 으로 바꿉니다.
 4. **평소처럼 요청하기** — 이제 터미널에 보내는 요청을 Claude가 팀 구조에 맞춰 나눠 처리합니다. 간단한 질문이나 어느 팀 역할에도 맞지 않는 일은 팀 없이 바로 처리합니다.
+
+---
+
+## 같은 계층 정보 흐름
+
+에이전트끼리는 서로를 직접 호출하지 않으므로, "A가 B에게 전달한다"는 **main이 A의 결과를 B의 프롬프트에 넣어 준다**는 뜻입니다. 에이전트 박스를 선택하면 편집 영역의 **Information flow (same level)** 에서 같은 계층의 다른 에이전트마다 방향을 고를 수 있습니다.
+
+| 선택 | 뜻 |
+|---|---|
+| `— no sharing` | 서로의 결과를 보지 않음 (기본값) |
+| `→ sends to` | 내 결과를 상대에게 넘길 수 있음 |
+| `← receives from` | 상대의 결과를 받을 수 있음 |
+| `↔ both ways` | 서로 주고받을 수 있음 (main이 여러 번 중계) |
+
+예: Team 1에 A, B, C가 있고 **A → B**, **B ↔ C** 로 정하면
+
+```
+▣ Team 1
+ ├─ ○ agent-a   → agent-b
+ ├─ ○ agent-b   ← agent-a · ↔ agent-c
+ └─ ○ agent-c   ↔ agent-b
+```
+
+- main은 A를 먼저 호출하고, B를 부를 때 A의 결과를 `[FROM agent-team-maker:team-1-agent-a] … [/FROM]` 블록으로 넣습니다.
+- B와 C 사이에서는 결과를 서로 오가며 전달할 수 있습니다. B의 결과를 A에게 넘기거나 A의 결과를 C에게 넘기는 호출은 모드가 막습니다.
+- 매니저가 `[MERGE]`로 멤버 결과를 모으는 것처럼 위아래 계층 사이의 전달은 그대로 허용됩니다. 다른 팀의 결과는 언제나 막힙니다.
+- `add_team` 도구에서도 멤버마다 `sendsTo: ["b"]`처럼 지정할 수 있습니다. 양방향이면 서로를 적으면 됩니다.
+
+> 모드가 막을 수 있는 것은 `[FROM]` 블록으로 넘긴 결과입니다. main이 블록 없이 결과를 그대로 붙여 넣는 경우는 프롬프트 규칙으로만 막습니다.
 
 ---
 
@@ -95,7 +127,7 @@ Claude Code에서 아래 두 줄을 실행합니다.
 | **Orchestrator** | 자식이 있는 멤버. 자기 아래 멤버들에게 다시 일을 나눕니다. |
 | **Worker** | 자식이 없는 멤버. 실제 작업을 수행합니다. |
 
-에이전트 타입 이름은 `agentteam-maker:<팀이름>-<에이전트이름>` 형태로 만들어지므로, 서로 다른 팀에 같은 이름(예: `agent-a`)이 있어도 괜찮습니다. 같은 팀 안에서 이름이 겹치면 패널에 경고가 표시됩니다.
+에이전트 타입 이름은 `agent-team-maker:<팀이름>-<에이전트이름>` 형태로 만들어지므로, 서로 다른 팀에 같은 이름(예: `agent-a`)이 있어도 괜찮습니다. 같은 팀 안에서 이름이 겹치면 패널에 경고가 표시됩니다.
 
 ---
 
@@ -119,6 +151,6 @@ Claude Code에서 아래 두 줄을 실행합니다.
 ## 개발자용: 저장소 구조
 
 - `.claude-plugin/marketplace.json` — 마켓플레이스 매니페스트 (`rico-agentteam`)
-- `agentteam-maker/hooks/register.tsx` — 패널 UI, `add_team` 도구, 팀 동작 규칙
-- `agentteam-maker/types/index.d.ts` — 플러그인 상태 타입
-- `agentteam-maker/tests/pane.test.tsx` — 패널 테스트
+- `agent-team-maker/hooks/register.tsx` — 패널 UI, `add_team` 도구, 팀 동작 규칙
+- `agent-team-maker/types/index.d.ts` — 플러그인 상태 타입
+- `agent-team-maker/tests/pane.test.tsx` — 패널 테스트
