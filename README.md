@@ -54,14 +54,16 @@ Claude Code에서 아래 두 줄을 실행합니다.
 
 ```
 /plugin marketplace add RicoKim328/agent-team-maker
-/plugin install agentteam-maker@rico-agentteam
+/plugin install agent-team-maker@rico-agentteam
 ```
+
+> **이전 이름(`agentteam-maker`)으로 설치했다면** 옛 플러그인을 지우고(`/plugin uninstall agentteam-maker@rico-agentteam`) 위 명령으로 다시 설치하세요. 패널 명령은 `/agent-team-maker`, 에이전트 타입은 `agent-team-maker:<팀>-<에이전트>`로 바뀝니다. 저장된 설계는 플러그인 이름별로 보관되므로 새 이름으로는 이어지지 않습니다. 필요하면 내보내 둔 `.claude/agentteam/team.json`을 참고해 다시 만들어 주세요.
 
 ---
 
 ## 빠른 시작 (3분)
 
-1. **패널 열기** — `/agentteam-maker` 를 입력하면 *Agent Team Maker* 패널이 열립니다. 처음에는 팀 2개(각각 매니저 1명 + 멤버 2명)짜리 예시가 들어 있습니다.
+1. **패널 열기** — `/agent-team-maker` 를 입력하면 *Agent Team Maker* 패널이 열립니다. 처음에는 팀 2개(각각 매니저 1명 + 멤버 2명)짜리 예시가 들어 있습니다.
 2. **역할 적기** — 박스를 선택하고 오른쪽 편집 영역에서 이름, 모델, **Role(역할)** 을 채웁니다. 역할이 구체적일수록 결과가 좋아집니다.
    - 매니저: "멤버 결과를 어떻게 검토하고 합칠지"
    - 멤버: "무엇을 담당하는지"
@@ -90,7 +92,7 @@ Claude Code에서 아래 두 줄을 실행합니다.
  └─ ○ agent-c   ↔ agent-b
 ```
 
-- main은 A를 먼저 호출하고, B를 부를 때 A의 결과를 `[FROM agentteam-maker:team-1-agent-a] … [/FROM]` 블록으로 넣습니다.
+- main은 A를 먼저 호출하고, B를 부를 때 A의 결과를 `[FROM agent-team-maker:team-1-agent-a] … [/FROM]` 블록으로 넣습니다.
 - B와 C 사이에서는 결과를 서로 오가며 전달할 수 있습니다. B의 결과를 A에게 넘기거나 A의 결과를 C에게 넘기는 호출은 모드가 막습니다.
 - 매니저가 `[MERGE]`로 멤버 결과를 모으는 것처럼 위아래 계층 사이의 전달은 그대로 허용됩니다. 다른 팀의 결과는 언제나 막힙니다.
 - `add_team` 도구에서도 멤버마다 `sendsTo: ["b"]`처럼 지정할 수 있습니다. 양방향이면 서로를 적으면 됩니다.
@@ -125,7 +127,7 @@ Claude Code에서 아래 두 줄을 실행합니다.
 | **Orchestrator** | 자식이 있는 멤버. 자기 아래 멤버들에게 다시 일을 나눕니다. |
 | **Worker** | 자식이 없는 멤버. 실제 작업을 수행합니다. |
 
-에이전트 타입 이름은 `agentteam-maker:<팀이름>-<에이전트이름>` 형태로 만들어지므로, 서로 다른 팀에 같은 이름(예: `agent-a`)이 있어도 괜찮습니다. 같은 팀 안에서 이름이 겹치면 패널에 경고가 표시됩니다.
+에이전트 타입 이름은 `agent-team-maker:<팀이름>-<에이전트이름>` 형태로 만들어지므로, 서로 다른 팀에 같은 이름(예: `agent-a`)이 있어도 괜찮습니다. 같은 팀 안에서 이름이 겹치면 패널에 경고가 표시됩니다.
 
 ---
 
@@ -149,6 +151,6 @@ Claude Code에서 아래 두 줄을 실행합니다.
 ## 개발자용: 저장소 구조
 
 - `.claude-plugin/marketplace.json` — 마켓플레이스 매니페스트 (`rico-agentteam`)
-- `agentteam-maker/hooks/register.tsx` — 패널 UI, `add_team` 도구, 팀 동작 규칙
-- `agentteam-maker/types/index.d.ts` — 플러그인 상태 타입
-- `agentteam-maker/tests/pane.test.tsx` — 패널 테스트
+- `agent-team-maker/hooks/register.tsx` — 패널 UI, `add_team` 도구, 팀 동작 규칙
+- `agent-team-maker/types/index.d.ts` — 플러그인 상태 타입
+- `agent-team-maker/tests/pane.test.tsx` — 패널 테스트

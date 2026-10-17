@@ -21,7 +21,7 @@ export type Flow = 'none' | 'to' | 'from' | 'both'
 
 declare module 'claude-code' {
   interface PluginState {
-    'agentteam-maker': {
+    'agent-team-maker': {
       nodes: AgentNode[]
       selected: string | null
       notice: string

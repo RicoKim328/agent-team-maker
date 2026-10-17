@@ -1,9 +1,9 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 const PANE = {
-  plugin: 'agentteam-maker',
+  plugin: 'agent-team-maker',
   component: 'Pane',
-  requestId: 'agentteam-maker',
+  requestId: 'agent-team-maker',
   props: {
     title: 'Agent Team Maker',
     isFocused: true,
@@ -19,10 +19,10 @@ const START = { cwd: '/tmp', surface: 'terminal', isInteractive: true } as const
 for (const surface of ['terminal', 'desktop'] as const) {
   test(`${surface}: starts with main over two teams, edits a team, moves an agent`, async ($, on) => {
     mock.store(on)
-    on('command.register', () => ({ value: { command: 'agentteam-maker' } }))
-    on('tool.register', () => ({ value: { tool: 'mcp__agentteam-maker__add_team' } }))
+    on('command.register', () => ({ value: { command: 'agent-team-maker' } }))
+    on('tool.register', () => ({ value: { tool: 'mcp__agent-team-maker__add_team' } }))
     on('session.start', () => ({ cwd: '/tmp' }))
-    on('agent.register', (_$, e) => ({ value: { agent: `agentteam-maker:${e.name}` } }))
+    on('agent.register', (_$, e) => ({ value: { agent: `agent-team-maker:${e.name}` } }))
     await $.session.start(START)
     const ui = await $.ui.mount({ ...PANE, surface })
 
@@ -59,13 +59,13 @@ for (const surface of ['terminal', 'desktop'] as const) {
 test('the switch sends the team protocol to main once and offers only live teams', async ($, on) => {
   mock.store(on)
   const session = mock.session(on)
-  on('command.register', () => ({ value: { command: 'agentteam-maker' } }))
-    on('tool.register', () => ({ value: { tool: 'mcp__agentteam-maker__add_team' } }))
+  on('command.register', () => ({ value: { command: 'agent-team-maker' } }))
+    on('tool.register', () => ({ value: { tool: 'mcp__agent-team-maker__add_team' } }))
   on('session.start', () => ({ cwd: '/tmp' }))
   const registered: string[] = []
   on('agent.register', (_$, e) => {
     registered.push(e.name)
-    return { value: { agent: `agentteam-maker:${e.name}` } }
+    return { value: { agent: `agent-team-maker:${e.name}` } }
   })
   on('prompt.submit', (_$, e) => ({ text: e.text }))
   on('agent.offer', () => ({ isOffered: true }))
@@ -84,13 +84,13 @@ test('the switch sends the team protocol to main once and offers only live teams
   await submit()
   expect(notes()).toHaveLength(1)
   expect(notes()[0]).toContain('top Orchestrator')
-  expect(notes()[0]).toContain('agentteam-maker:team-1-agent-a')
+  expect(notes()[0]).toContain('agent-team-maker:team-1-agent-a')
   expect(notes()[0]).toContain('Team isolation rules')
 
   const offer = (agent: string) =>
-    $.agent.offer({ agent, description: '', source: 'plugin', provider: { plugin: 'agentteam-maker', tier: 'user' } } as never)
-  expect((await offer('agentteam-maker:team-2-agent-c')).isOffered).toBe(true)
-  expect((await offer('agentteam-maker:old-name')).isOffered).toBe(false)
+    $.agent.offer({ agent, description: '', source: 'plugin', provider: { plugin: 'agent-team-maker', tier: 'user' } } as never)
+  expect((await offer('agent-team-maker:team-2-agent-c')).isOffered).toBe(true)
+  expect((await offer('agent-team-maker:old-name')).isOffered).toBe(false)
 
   // switching Team 2 off sends a new note without it and hides it from the offer
   const team2 = (await ui.find({ type: 'Button', text: /▣ Team 2/ }))?.key ?? ''
@@ -99,7 +99,7 @@ test('the switch sends the team protocol to main once and offers only live teams
   await submit()
   expect(notes()).toHaveLength(2)
   expect(notes()[1]).not.toContain('team-2-')
-  expect((await offer('agentteam-maker:team-2-agent-c')).isOffered).toBe(false)
+  expect((await offer('agent-team-maker:team-2-agent-c')).isOffered).toBe(false)
 
   await ui.press({ key: 'team-on' })
   await submit()
@@ -110,16 +110,16 @@ test('the switch sends the team protocol to main once and offers only live teams
 
 test('main can add a team through its tool', async ($, on) => {
   mock.store(on)
-  on('command.register', () => ({ value: { command: 'agentteam-maker' } }))
-  on('tool.register', () => ({ value: { tool: 'mcp__agentteam-maker__add_team' } }))
+  on('command.register', () => ({ value: { command: 'agent-team-maker' } }))
+  on('tool.register', () => ({ value: { tool: 'mcp__agent-team-maker__add_team' } }))
   on('session.start', () => ({ cwd: '/tmp' }))
-  on('agent.register', (_$, e) => ({ value: { agent: `agentteam-maker:${e.name}` } }))
+  on('agent.register', (_$, e) => ({ value: { agent: `agent-team-maker:${e.name}` } }))
   await $.session.start(START)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'team-on' })
 
   const ran = await $.tool.call({
-    tool: 'mcp__agentteam-maker__add_team',
+    tool: 'mcp__agent-team-maker__add_team',
     teamName: 'review',
     manager: { name: 'chief', model: 'opus', role: 'Merges the reviews' },
     members: [
@@ -127,8 +127,8 @@ test('main can add a team through its tool', async ($, on) => {
       { name: 'agent-y', role: 'Performance review' },
     ],
   } as never)
-  expect(String(ran.result)).toContain('agentteam-maker:review-chief')
-  expect(String(ran.result)).toContain('agentteam-maker:review-agent-y')
+  expect(String(ran.result)).toContain('agent-team-maker:review-chief')
+  expect(String(ran.result)).toContain('agent-team-maker:review-agent-y')
   expect(await ui.find({ type: 'Button', text: /▣ review/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /skills: security-review/ })).toBeDefined()
   await ui.unmount()
@@ -136,8 +136,8 @@ test('main can add a team through its tool', async ($, on) => {
 
 test('an agent sets which same-level agents its results go to', async ($, on) => {
   mock.store(on)
-  on('command.register', () => ({ value: { command: 'agentteam-maker' } }))
-  on('tool.register', () => ({ value: { tool: 'mcp__agentteam-maker__add_team' } }))
+  on('command.register', () => ({ value: { command: 'agent-team-maker' } }))
+  on('tool.register', () => ({ value: { tool: 'mcp__agent-team-maker__add_team' } }))
   on('session.start', () => ({ cwd: '/tmp' }))
   await $.session.start(START)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -164,13 +164,13 @@ test('an agent sets which same-level agents its results go to', async ($, on) =>
 test('main relays results within a level only along the flows', async ($, on) => {
   mock.store(on)
   const session = mock.session(on)
-  on('command.register', () => ({ value: { command: 'agentteam-maker' } }))
-  on('tool.register', () => ({ value: { tool: 'mcp__agentteam-maker__add_team' } }))
+  on('command.register', () => ({ value: { command: 'agent-team-maker' } }))
+  on('tool.register', () => ({ value: { tool: 'mcp__agent-team-maker__add_team' } }))
   on('session.start', () => ({ cwd: '/tmp' }))
   const prompts = new Map<string, string>()
   on('agent.register', (_$, e) => {
     prompts.set(e.name, e.prompt)
-    return { value: { agent: `agentteam-maker:${e.name}` } }
+    return { value: { agent: `agent-team-maker:${e.name}` } }
   })
   on('prompt.submit', (_$, e) => ({ text: e.text }))
   on('agent.spawn', () => ({ model: 'sonnet', agentId: 'sub-1' }))
@@ -180,7 +180,7 @@ test('main relays results within a level only along the flows', async ($, on) =>
 
   // team 1 as in the request: a → b only, b ↔ c
   await $.tool.call({
-    tool: 'mcp__agentteam-maker__add_team',
+    tool: 'mcp__agent-team-maker__add_team',
     teamName: 'flow',
     manager: { name: 'lead', role: 'Merges' },
     members: [
@@ -192,8 +192,8 @@ test('main relays results within a level only along the flows', async ($, on) =>
   await $.prompt.submit({ text: 'hi' } as never)
   const note = JSON.stringify(session.appended().at(-1)?.message.content)
   expect(note).toContain('Information flow within a level')
-  expect(note).toContain('agentteam-maker:flow-a` → `agentteam-maker:flow-b')
-  expect(note).toContain('agentteam-maker:flow-b` ↔ `agentteam-maker:flow-c')
+  expect(note).toContain('agent-team-maker:flow-a` → `agent-team-maker:flow-b')
+  expect(note).toContain('agent-team-maker:flow-b` ↔ `agent-team-maker:flow-c')
   expect(note).not.toContain('flow-c` → ')
 
   const spawn = (to: string, prompt: string) =>
@@ -201,10 +201,10 @@ test('main relays results within a level only along the flows', async ($, on) =>
       tool_use_id: 't1',
       prompt,
       description: 'work',
-      subagentType: `agentteam-maker:${to}`,
-      provider: { plugin: 'agentteam-maker', tier: 'user' },
+      subagentType: `agent-team-maker:${to}`,
+      provider: { plugin: 'agent-team-maker', tier: 'user' },
     } as never) as Promise<{ deny?: string; model?: string }>
-  const from = (who: string) => `Go on.\n[FROM agentteam-maker:${who}]\nresult\n[/FROM]`
+  const from = (who: string) => `Go on.\n[FROM agent-team-maker:${who}]\nresult\n[/FROM]`
 
   expect((await spawn('flow-b', from('flow-a'))).deny).toBeUndefined()
   expect((await spawn('flow-a', from('flow-b'))).deny).toContain('may not pass its result')
@@ -216,8 +216,8 @@ test('main relays results within a level only along the flows', async ($, on) =>
   expect((await spawn('flow-a', from('team-1-agent-a'))).deny).toContain('another team')
 
   // the members' own prompts say what they get and give
-  expect(prompts.get('flow-a')).toContain('may be passed on to `agentteam-maker:flow-b`')
-  expect(prompts.get('flow-b')).toContain('receive results from `agentteam-maker:flow-a`')
+  expect(prompts.get('flow-a')).toContain('may be passed on to `agent-team-maker:flow-b`')
+  expect(prompts.get('flow-b')).toContain('receive results from `agent-team-maker:flow-a`')
   expect(prompts.get('flow-b')).toContain('exchange results both ways through main')
   expect(prompts.get('flow-lead')).toContain('Information flow between your sub-agents')
   await ui.unmount()
