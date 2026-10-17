@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { AgentKind, AgentNode } from '../types'
+import type { AgentKind, AgentNode, Flow } from '../types'
 
 const PLUGIN = 'agentteam-maker'
 const PANE = 'agentteam-maker'
@@ -28,6 +28,7 @@ const blank = (kind: AgentKind, parentId: string | null, name: string, teamName 
   role: '',
   useSkills: false,
   skills: [],
+  sendsTo: [],
 })
 
 const MAIN: AgentNode = { ...blank('main', null, 'main'), id: 'main' }
@@ -50,7 +51,7 @@ const starter = (): AgentNode[] => {
 const normalize = (raw: unknown): AgentNode[] => {
   if (!Array.isArray(raw) || raw.length === 0) return starter()
   const list = raw as Partial<AgentNode>[]
-  if (list.some(n => n.kind === 'main')) return list as AgentNode[]
+  if (list.some(n => n.kind === 'main')) return list.map(n => ({ ...n, sendsTo: n.sendsTo ?? [] }) as AgentNode)
   let teams = 0
   return [
     MAIN,
@@ -117,6 +118,43 @@ const slug = (name: string, fallback: string) => {
 const typeName = (list: AgentNode[], node: AgentNode) => {
   const team = teamOf(list, node)
   return `${slug(team?.teamName ?? '', 'team')}-${slug(node.name, 'agent')}`
+}
+
+// Information flow between agents on one level: main relays a sender's
+// result into a receiver's prompt, only along these directions.
+
+const siblingsOf = (list: AgentNode[], node: AgentNode) =>
+  node.kind === 'agent' ? childrenOf(list, node.parentId).filter(n => n.kind === 'agent' && n.id !== node.id) : []
+
+const flowOf = (a: AgentNode, b: AgentNode): Flow => {
+  const out = a.sendsTo.includes(b.id)
+  const back = b.sendsTo.includes(a.id)
+  return out && back ? 'both' : out ? 'to' : back ? 'from' : 'none'
+}
+
+const setFlow = (list: AgentNode[], aId: string, bId: string, flow: Flow) => {
+  const link = (n: AgentNode, other: string, isOn: boolean) => ({
+    ...n,
+    sendsTo: isOn ? [...n.sendsTo.filter(id => id !== other), other] : n.sendsTo.filter(id => id !== other),
+  })
+  return list.map(n =>
+    n.id === aId ? link(n, bId, flow === 'to' || flow === 'both') : n.id === bId ? link(n, aId, flow === 'from' || flow === 'both') : n,
+  )
+}
+
+const FLOW_MARK: Record<Flow, string> = { none: '', to: '→', from: '←', both: '↔' }
+
+// `a → b` and `a ↔ b` lines for the given nodes, each pair once.
+const flowLines = (list: AgentNode[], group: AgentNode[], prefix: string) => {
+  const name = (n: AgentNode) => `\`${prefix}${typeName(list, n)}\``
+  return group.flatMap(a =>
+    siblingsOf(list, a)
+      .filter(b => {
+        const flow = flowOf(a, b)
+        return flow === 'to' || (flow === 'both' && list.indexOf(a) < list.indexOf(b))
+      })
+      .map(b => `- ${name(a)} ${FLOW_MARK[flowOf(a, b)]} ${name(b)}`),
+  )
 }
 
 const firstLine = (text: string) => text.trim().split('\n')[0] ?? ''
@@ -206,8 +244,28 @@ const agentPrompt = (list: AgentNode[], node: AgentNode, prefix: string) => {
       'When a request starts with `[MERGE]`: review and merge the sub-agent results passed along with it into a final result.',
       'If the results fall short, ask for more work with a `[REDELEGATE]` block in the same format.',
     )
+    const flows = flowLines(list, kids, prefix)
+    if (flows.length > 0) {
+      lines.push(
+        '',
+        '## Information flow between your sub-agents',
+        ...flows,
+        'A result may reach a fellow sub-agent only along these directions (`↔` both ways). In a `[DELEGATE]` list, put a sender before its receiver.',
+      )
+    }
   } else if (parent) {
     lines.push('', '## Reporting', `Return your result to main, which called you. Main uses it for ${parent.kind === 'main' ? 'the final synthesis' : `the merge by ${parent.name} above you`}, so keep it concise and verifiable.`)
+  }
+  const sibs = siblingsOf(list, node)
+  const name = (n: AgentNode) => `\`${prefix}${typeName(list, n)}\``
+  const by = (flow: Flow) => sibs.filter(s => flowOf(node, s) === flow).map(name).join(', ')
+  const flowRules = [
+    by('from') && `- You may receive results from ${by('from')}, passed by main in \`[FROM <agent>]\` blocks.`,
+    by('to') && `- Your result may be passed on to ${by('to')}, so state it so they can build on it.`,
+    by('both') && `- You and ${by('both')} exchange results both ways through main, in \`[FROM <agent>]\` blocks.`,
+  ].filter(Boolean)
+  if (flowRules.length > 0) {
+    lines.push('', '## Information flow (same level)', ...flowRules, '- Work of other agents on your level is not shared with you.')
   }
   return lines.join('\n')
 }
@@ -222,6 +280,7 @@ const mainSection = (list: AgentNode[], live: AgentNode[], prefix: string) => {
       const skills = node.useSkills && node.skills.length > 0 ? `, skills: ${node.skills.join(', ')}` : ''
       return `${'  '.repeat(depth - 1)}- ${head}\`${prefix}${typeName(list, node)}\` (${kindLabel(list, node)}, ${node.model}${skills}): ${firstLine(node.role) || '-'}`
     })
+  const flows = flowLines(list, live, prefix)
   return [
     '# Agent Team (agentteam-maker)',
     'You (Claude in this terminal) are the top Orchestrator of this agent team. Only you call sub-agents, with the Agent tool.',
@@ -233,7 +292,8 @@ const mainSection = (list: AgentNode[], live: AgentNode[], prefix: string) => {
     '## Procedure',
     'When a task comes in, split it by each team\'s role, then for each team independently:',
     '1. Call the team manager with a prompt that starts with `[PLAN]` and holds only that team\'s share of the work. → You get a `[DELEGATE]` list.',
-    '2. Call each sub-agent on the list (in parallel when independent). If a sub-agent is an Orchestrator, apply steps 1-3 to it the same way.',
+    '2. Call each sub-agent on the list (in parallel when independent). If a sub-agent is an Orchestrator, apply steps 1-3 to it the same way.' +
+      (flows.length > 0 ? ' Along an information flow below, call the sender first and put its result in the receiver\'s prompt as `[FROM <subagent_type>] … [/FROM]`.' : ''),
     '3. Collect the results and call the manager again with a prompt that starts with `[MERGE]` and holds only that team\'s results. On `[REDELEGATE]`, go back to step 2.',
     '4. Synthesize all teams\' results yourself and answer the user.',
     '',
@@ -242,6 +302,15 @@ const mainSection = (list: AgentNode[], live: AgentNode[], prefix: string) => {
     '- Only you compare or combine teams, in step 4. Teams never exchange opinions.',
     '- Team agents cannot call other agents (the mod blocks it).',
     '- Simple questions, or work no team\'s role covers, you may handle directly without the teams.',
+    ...(flows.length > 0
+      ? [
+          '',
+          '## Information flow within a level (always follow)',
+          ...flows,
+          '- `→` lets you pass the left agent\'s result to the right one only; `↔` both ways, for as many rounds as the work needs.',
+          '- Pass a result to an agent on the same level only along these directions, inside a `[FROM <subagent_type>]` block (the mod blocks any other). Agents on one level with no flow between them never see each other\'s results.',
+        ]
+      : []),
   ].join('\n')
 }
 
@@ -312,11 +381,16 @@ const MEMBER_SCHEMA = {
     model: { type: 'string', enum: MODELS },
     role: { type: 'string', description: 'What this agent is responsible for' },
     skills: { type: 'array', items: { type: 'string' } },
+    sendsTo: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'Members only: names of fellow members this member\'s results may be passed to (one way; list each other for both ways)',
+    },
   },
   required: ['name', 'role'],
 }
 
-type MemberInput = { name: string; model?: string; role: string; skills?: string[] }
+type MemberInput = { name: string; model?: string; role: string; skills?: string[]; sendsTo?: string[] }
 
 const toNode = (kind: AgentKind, parentId: string, m: MemberInput, teamName = ''): AgentNode => ({
   ...blank(kind, parentId, m.name, teamName),
@@ -325,6 +399,25 @@ const toNode = (kind: AgentKind, parentId: string, m: MemberInput, teamName = ''
   useSkills: (m.skills ?? []).length > 0,
   skills: m.skills ?? [],
 })
+
+// Why main may not pass a `[FROM <agent>]` block into this prompt, or ''.
+const flowProblem = (list: AgentNode[], receiver: AgentNode, prompt: string) => {
+  const byType = (t: string) => list.find(n => n.kind !== 'main' && typeName(list, n) === t.replace(`${PLUGIN}:`, ''))
+  for (const [, type] of prompt.matchAll(/\[FROM\s+([^\]\s]+)\]/g)) {
+    const sender = byType(type ?? '')
+    if (!sender || sender.id === receiver.id) continue
+    if (teamOf(list, sender) !== teamOf(list, receiver)) {
+      return `"${sender.name}" is in another team, and teams never see each other's results. Remove that [FROM] block.`
+    }
+    if (siblingsOf(list, receiver).includes(sender) && !sender.sendsTo.includes(receiver.id)) {
+      const allowed = siblingsOf(list, receiver).filter(s => s.sendsTo.includes(receiver.id)).map(s => s.name)
+      return `"${sender.name}" may not pass its result to "${receiver.name}" (information flow). ${
+        allowed.length > 0 ? `It may receive only from: ${allowed.join(', ')}.` : 'It receives from no agent on its level.'
+      } Remove that [FROM] block.`
+    }
+  }
+  return ''
+}
 
 // Export: one subagent file per team agent plus a team overview.
 
@@ -398,6 +491,8 @@ export const register: Register = on => {
       await $.store.set('design', list)
       const savedOn = await $.store.get('teamOn')
       await update($, isTeamOn, () => savedOn === true)
+    } else if (current.some(n => n.sendsTo === undefined)) {
+      await update($, nodes, normalize)
     }
     if (await read($, isTeamOn)) {
       const problem = await syncAgents($).catch((error: unknown) => `Agent registration failed: ${String(error)}`)
@@ -409,7 +504,11 @@ export const register: Register = on => {
   on('tool.call', { tool: 'mcp__agentteam-maker__add_team' }, async ($, e) => {
     const input = e as unknown as { teamName: string; manager: MemberInput; members: MemberInput[] }
     const manager = toNode('team', 'main', input.manager, input.teamName)
-    const members = input.members.map(m => toNode('agent', manager.id, m))
+    const made = input.members.map(m => toNode('agent', manager.id, m))
+    const members = made.map((n, i) => ({
+      ...n,
+      sendsTo: (input.members[i]?.sendsTo ?? []).flatMap(to => made.filter(o => o.name === to && o.id !== n.id).map(o => o.id)),
+    }))
     const list = await change($, l => [...l, manager, ...members])
     await update($, selected, () => manager.id)
     const problem = await read($, notice)
@@ -450,10 +549,17 @@ export const register: Register = on => {
     return isLive ? next(e) : { isOffered: false }
   }).catch(($, e, next) => (next.called || !e.agent.startsWith(`${PLUGIN}:`) ? next(e) : { isOffered: false }))
 
-  // Team agents are called by the main session alone, never by one another.
-  on('agent.spawn', ($, e, next) => {
+  // Team agents are called by the main session alone, never by one another,
+  // and main relays results between agents of one level only along their flows.
+  on('agent.spawn', async ($, e, next) => {
     if (e.subagentType.startsWith(`${PLUGIN}:`) && e.parentAgentId !== undefined) {
       return { deny: 'Team agents can be called only by the top-level main (the terminal session). Return your result to main.' }
+    }
+    if (e.subagentType.startsWith(`${PLUGIN}:`)) {
+      const list = await read($, nodes)
+      const receiver = list.find(n => n.kind !== 'main' && `${PLUGIN}:${typeName(list, n)}` === e.subagentType)
+      const problem = receiver ? flowProblem(list, receiver, e.prompt) : ''
+      if (problem) return { deny: problem }
     }
     return next(e)
   }).catch(($, e, next) => (next.called ? next(e) : { deny: 'agentteam-maker: spawn check failed' }))
@@ -521,6 +627,9 @@ export const register: Register = on => {
         {ordered(list).map(({ node: n, depth }) => {
           const isSel = n.id === selId
           const team = teamOf(list, n)
+          const flows = siblingsOf(list, n)
+            .filter(b => flowOf(n, b) !== 'none')
+            .map(b => `${FLOW_MARK[flowOf(n, b)]} ${b.name}`)
           const isDim = n.kind !== 'main' && (!isOn || team?.isActive !== true)
           const title =
             n.kind === 'main'
@@ -549,6 +658,7 @@ export const register: Register = on => {
                   {title} <Text dimColor>· {sub}</Text>
                 </Button>
                 {n.role.trim() !== '' && <Text dimColor>{firstLine(n.role).slice(0, 60)}</Text>}
+                {flows.length > 0 && <Text color="permission">{flows.join(' · ')}</Text>}
                 {n.useSkills && (
                   <Text color="suggestion">
                     skills: {n.skills.length > 0 ? n.skills.join(', ') : '(add some)'}
@@ -650,6 +760,34 @@ export const register: Register = on => {
       </Box>
     )
 
+    const flowFields = (n: AgentNode) => {
+      const sibs = siblingsOf(list, n)
+      return (
+        <Box flexDirection="column">
+          <Text weight="bold">Information flow (same level)</Text>
+          {sibs.length === 0 ? (
+            <Text dimColor>No other agents on this level.</Text>
+          ) : (
+            sibs.map(b => (
+              <Select
+                key={`flow-${n.id}-${b.id}`}
+                label={b.name}
+                value={flowOf(n, b)}
+                options={[
+                  { value: 'none', label: '— no sharing' },
+                  { value: 'to', label: `→ sends to ${b.name}` },
+                  { value: 'from', label: `← receives from ${b.name}` },
+                  { value: 'both', label: `↔ both ways` },
+                ]}
+                onSelect={v => change($, l => setFlow(l, n.id, b.id, v as Flow))}
+              />
+            ))
+          )}
+          <Text dimColor>Main passes results only along these directions; the mod blocks any other.</Text>
+        </Box>
+      )
+    }
+
     const editor = !node ? (
       <Text dimColor>Select a box to edit it here.</Text>
     ) : node.kind === 'main' ? (
@@ -696,6 +834,7 @@ export const register: Register = on => {
           </Text>
         )}
         {agentFields(node)}
+        {node.kind === 'agent' && flowFields(node)}
         <Text dimColor>Agent type: {PLUGIN}:{typeName(list, node)}</Text>
       </Box>
     )

@@ -133,3 +133,92 @@ test('main can add a team through its tool', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: /skills: security-review/ })).toBeDefined()
   await ui.unmount()
 })
+
+test('an agent sets which same-level agents its results go to', async ($, on) => {
+  mock.store(on)
+  on('command.register', () => ({ value: { command: 'agentteam-maker' } }))
+  on('tool.register', () => ({ value: { tool: 'mcp__agentteam-maker__add_team' } }))
+  on('session.start', () => ({ cwd: '/tmp' }))
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+
+  const pick = async (name: RegExp) => {
+    const key = (await ui.find({ type: 'Button', text: name }))?.key ?? ''
+    await ui.press({ key })
+    return key.replace(/^pick-/, '')
+  }
+  const b = await pick(/○ agent-b/)
+  const a = await pick(/○ agent-a/)
+  expect(await ui.find({ type: 'Text', text: 'Information flow (same level)' })).toBeDefined()
+  await ui.select({ key: `flow-${a}-${b}`, value: 'to' })
+  expect(await ui.find({ type: 'Text', text: '→ agent-b' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '← agent-a' })).toBeDefined()
+
+  // from agent-b's side the same link reads as "receives from"
+  await pick(/○ agent-b/)
+  await ui.select({ key: `flow-${b}-${a}`, value: 'both' })
+  expect(await ui.find({ type: 'Text', text: '↔ agent-b' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('main relays results within a level only along the flows', async ($, on) => {
+  mock.store(on)
+  const session = mock.session(on)
+  on('command.register', () => ({ value: { command: 'agentteam-maker' } }))
+  on('tool.register', () => ({ value: { tool: 'mcp__agentteam-maker__add_team' } }))
+  on('session.start', () => ({ cwd: '/tmp' }))
+  const prompts = new Map<string, string>()
+  on('agent.register', (_$, e) => {
+    prompts.set(e.name, e.prompt)
+    return { value: { agent: `agentteam-maker:${e.name}` } }
+  })
+  on('prompt.submit', (_$, e) => ({ text: e.text }))
+  on('agent.spawn', () => ({ model: 'sonnet', agentId: 'sub-1' }))
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'team-on' })
+
+  // team 1 as in the request: a → b only, b ↔ c
+  await $.tool.call({
+    tool: 'mcp__agentteam-maker__add_team',
+    teamName: 'flow',
+    manager: { name: 'lead', role: 'Merges' },
+    members: [
+      { name: 'a', role: 'Drafts', sendsTo: ['b'] },
+      { name: 'b', role: 'Refines', sendsTo: ['c'] },
+      { name: 'c', role: 'Checks', sendsTo: ['b'] },
+    ],
+  } as never)
+  await $.prompt.submit({ text: 'hi' } as never)
+  const note = JSON.stringify(session.appended().at(-1)?.message.content)
+  expect(note).toContain('Information flow within a level')
+  expect(note).toContain('agentteam-maker:flow-a` → `agentteam-maker:flow-b')
+  expect(note).toContain('agentteam-maker:flow-b` ↔ `agentteam-maker:flow-c')
+  expect(note).not.toContain('flow-c` → ')
+
+  const spawn = (to: string, prompt: string) =>
+    $.agent.spawn({
+      tool_use_id: 't1',
+      prompt,
+      description: 'work',
+      subagentType: `agentteam-maker:${to}`,
+      provider: { plugin: 'agentteam-maker', tier: 'user' },
+    } as never) as Promise<{ deny?: string; model?: string }>
+  const from = (who: string) => `Go on.\n[FROM agentteam-maker:${who}]\nresult\n[/FROM]`
+
+  expect((await spawn('flow-b', from('flow-a'))).deny).toBeUndefined()
+  expect((await spawn('flow-a', from('flow-b'))).deny).toContain('may not pass its result')
+  expect((await spawn('flow-c', from('flow-b'))).deny).toBeUndefined()
+  expect((await spawn('flow-b', `[FROM flow-c]\nx\n[/FROM]`)).deny).toBeUndefined()
+  expect((await spawn('flow-c', from('flow-a'))).deny).toContain('may not pass its result')
+  // the manager merges its members' results; another team's never reach a member
+  expect((await spawn('flow-lead', `[MERGE]\n${from('flow-a')}`)).deny).toBeUndefined()
+  expect((await spawn('flow-a', from('team-1-agent-a'))).deny).toContain('another team')
+
+  // the members' own prompts say what they get and give
+  expect(prompts.get('flow-a')).toContain('may be passed on to `agentteam-maker:flow-b`')
+  expect(prompts.get('flow-b')).toContain('receive results from `agentteam-maker:flow-a`')
+  expect(prompts.get('flow-b')).toContain('exchange results both ways through main')
+  expect(prompts.get('flow-lead')).toContain('Information flow between your sub-agents')
+  await ui.unmount()
+})
