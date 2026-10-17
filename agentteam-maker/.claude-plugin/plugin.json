@@ -1,0 +1,6 @@
+{
+  "name": "agentteam-maker",
+  "version": "0.1.0",
+  "description": "Design multi-level Orchestrator/Worker agent teams in a pane and export them as subagents",
+  "types": "./types/index.d.ts"
+}

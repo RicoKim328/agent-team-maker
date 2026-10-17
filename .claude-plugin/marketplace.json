@@ -1,0 +1,5 @@
+{
+  "name": "rico-agentteam",
+  "owner": { "name": "rico" },
+  "plugins": [{ "name": "agentteam-maker", "source": "./agentteam-maker" }]
+}
